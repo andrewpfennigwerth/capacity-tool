@@ -114,6 +114,9 @@ GET /api/carriers
 GET /api/periods?granularity=month|quarter
 GET /api/capacity/summary?carrier=DL&period=2026-Q2
 GET /api/capacity/routes?carrier=DL&period=2026-Q2&sort=oa_change&limit=50&offset=0
+GET /api/capacity/routes?carrier=DL&period=2026-Q2&origin=LGA&destination=RSW
 ```
 
 The endpoint functions validate HTTP input and map typed query results into Pydantic response models. They do not duplicate the same-store calculation; all analytical population and metric logic remains in the canonical SQL query.
+
+`origin` and `destination` are optional exact filters, but they must be supplied together. Because O&Ds are directional, filtering `LGA→RSW` does not also return `RSW→LGA`.

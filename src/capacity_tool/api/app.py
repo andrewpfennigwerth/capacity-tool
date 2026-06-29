@@ -113,8 +113,14 @@ def create_app(database_path: Path | None = None) -> FastAPI:
         ] = "oa_change",
         limit: Annotated[int, Query(ge=1, le=500)] = 50,
         offset: Annotated[int, Query(ge=0)] = 0,
+        origin: Annotated[str | None, Query(min_length=3, max_length=3)] = None,
+        destination: Annotated[
+            str | None, Query(min_length=3, max_length=3)
+        ] = None,
     ) -> SameStoreRoutePageResponse:
         try:
+            if (origin is None) != (destination is None):
+                raise ValueError("Origin and destination must be supplied together.")
             parsed_period = parse_analysis_period(period)
             page = get_same_store_route_page(
                 _database_path(request),
@@ -123,6 +129,8 @@ def create_app(database_path: Path | None = None) -> FastAPI:
                 sort,
                 limit,
                 offset,
+                origin,
+                destination,
             )
             return SameStoreRoutePageResponse(
                 carrier_code=carrier.upper(),

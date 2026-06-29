@@ -95,6 +95,27 @@ def test_routes_endpoint_ranks_and_paginates_canonical_routes(
     assert result["routes"][0]["oa_seat_change"] == 160
 
 
+def test_routes_endpoint_filters_one_exact_directional_route(
+    client: TestClient,
+) -> None:
+    response = client.get(
+        "/api/capacity/routes",
+        params={
+            "carrier": "DL",
+            "period": "2026-Q2",
+            "origin": "bbb",
+            "destination": "aaa",
+        },
+    )
+
+    assert response.status_code == 200
+    result = response.json()
+    assert result["total"] == 1
+    assert len(result["routes"]) == 1
+    assert result["routes"][0]["origin_code"] == "BBB"
+    assert result["routes"][0]["destination_code"] == "AAA"
+
+
 def test_api_returns_clear_client_errors(client: TestClient) -> None:
     unavailable_period = client.get(
         "/api/capacity/summary",
@@ -112,6 +133,17 @@ def test_api_returns_clear_client_errors(client: TestClient) -> None:
         },
     )
     assert invalid_page.status_code == 422
+
+    incomplete_od = client.get(
+        "/api/capacity/routes",
+        params={
+            "carrier": "DL",
+            "period": "2026-Q2",
+            "origin": "AAA",
+        },
+    )
+    assert incomplete_od.status_code == 400
+    assert "supplied together" in incomplete_od.json()["detail"]
 
 
 def test_api_reports_missing_warehouse_as_unavailable(tmp_path: Path) -> None:

@@ -14,6 +14,7 @@ import duckdb
 PeriodGranularity = Literal["month", "quarter"]
 RouteSort = Literal["oa_change", "carrier_change"]
 _CARRIER_CODE = re.compile(r"^[A-Z0-9]{2}$")
+_AIRPORT_CODE = re.compile(r"^[A-Z0-9]{3}$")
 _SAME_STORE_ROUTES_SQL = (
     files("capacity_tool.sql")
     .joinpath("same_store_routes.sql")
@@ -135,6 +136,13 @@ def _normalize_carrier_code(value: str) -> str:
     if not _CARRIER_CODE.fullmatch(carrier_code):
         raise ValueError(f"Invalid carrier code {value!r}.")
     return carrier_code
+
+
+def _normalize_airport_code(value: str) -> str:
+    airport_code = value.strip().upper()
+    if not _AIRPORT_CODE.fullmatch(airport_code):
+        raise ValueError(f"Invalid airport code {value!r}.")
+    return airport_code
 
 
 def _active_batch_subquery() -> str:
@@ -355,6 +363,8 @@ def get_same_store_route_page(
     sort: RouteSort,
     limit: int,
     offset: int,
+    origin_code: str | None = None,
+    destination_code: str | None = None,
 ) -> SameStoreRoutePage:
     """Return a ranked and paginated page from the canonical route query."""
 
@@ -368,26 +378,38 @@ def get_same_store_route_page(
         raise ValueError("Route page limit must be between 1 and 500.")
     if offset < 0:
         raise ValueError("Route page offset cannot be negative.")
+    if (origin_code is None) != (destination_code is None):
+        raise ValueError("Origin and destination must be supplied together.")
 
     normalized_carrier = _normalize_carrier_code(carrier_code)
     period = parse_analysis_period(period_value)
     parameters = _same_store_parameters(normalized_carrier, period)
     canonical_query = f"({_SAME_STORE_ROUTES_SQL}) AS same_store_routes"
+    route_filter = ""
+    filter_parameters: list[str] = []
+    if origin_code is not None and destination_code is not None:
+        route_filter = "WHERE origin_code = ? AND destination_code = ?"
+        filter_parameters = [
+            _normalize_airport_code(origin_code),
+            _normalize_airport_code(destination_code),
+        ]
+
     connection = duckdb.connect(str(database_path), read_only=True)
     try:
         _validate_analysis_request(connection, normalized_carrier, period)
         total = connection.execute(
-            f"SELECT COUNT(*) FROM {canonical_query}",
-            parameters,
+            f"SELECT COUNT(*) FROM {canonical_query} {route_filter}",
+            [*parameters, *filter_parameters],
         ).fetchone()[0]
         rows = connection.execute(
             f"""
             SELECT *
             FROM {canonical_query}
+            {route_filter}
             ORDER BY ABS({sort_columns[sort]}) DESC, origin_code, destination_code
             LIMIT ? OFFSET ?
             """,
-            [*parameters, limit, offset],
+            [*parameters, *filter_parameters, limit, offset],
         ).fetchall()
     finally:
         connection.close()
