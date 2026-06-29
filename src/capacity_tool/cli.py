@@ -6,7 +6,11 @@ import argparse
 from pathlib import Path
 
 from capacity_tool.ingestion import ValidationError, build_warehouse
-from capacity_tool.queries import get_route_capacity
+from capacity_tool.queries import (
+    get_route_capacity,
+    get_same_store_route_page,
+    get_same_store_summary,
+)
 
 
 def _build_parser() -> argparse.ArgumentParser:
@@ -51,6 +55,45 @@ def _build_parser() -> argparse.ArgumentParser:
         default=Path("warehouse/capacity.duckdb"),
         help="Path to an existing DuckDB warehouse.",
     )
+
+    summary = commands.add_parser(
+        "same-store-summary",
+        help="Calculate aggregate same-store carrier and OA capacity.",
+    )
+    summary.add_argument("--carrier", required=True, help="Marketing carrier code.")
+    summary.add_argument(
+        "--period", required=True, help="Current period in YYYY-MM or YYYY-QN format."
+    )
+    summary.add_argument(
+        "--database",
+        type=Path,
+        default=Path("warehouse/capacity.duckdb"),
+        help="Path to an existing DuckDB warehouse.",
+    )
+
+    routes = commands.add_parser(
+        "same-store-routes",
+        help="Show route-level same-store carrier and OA capacity.",
+    )
+    routes.add_argument("--carrier", required=True, help="Marketing carrier code.")
+    routes.add_argument(
+        "--period", required=True, help="Current period in YYYY-MM or YYYY-QN format."
+    )
+    routes.add_argument(
+        "--limit", type=int, default=20, help="Maximum routes to display."
+    )
+    routes.add_argument(
+        "--sort",
+        choices=("oa-change", "carrier-change"),
+        default="oa-change",
+        help="Absolute-change metric used to rank displayed routes.",
+    )
+    routes.add_argument(
+        "--database",
+        type=Path,
+        default=Path("warehouse/capacity.duckdb"),
+        help="Path to an existing DuckDB warehouse.",
+    )
     return parser
 
 
@@ -88,13 +131,74 @@ def _run_route(args: argparse.Namespace) -> int:
     return 0
 
 
+def _format_percent(value: float | None) -> str:
+    return "—" if value is None else f"{value:+.1%}"
+
+
+def _run_same_store_summary(args: argparse.Namespace) -> int:
+    summary = get_same_store_summary(args.database, args.carrier, args.period)
+    print(
+        f"{summary.carrier_code} same-store: "
+        f"{summary.period} vs {summary.comparison_period}"
+    )
+    print(f"Directional routes: {summary.same_store_route_count:,}")
+    print(
+        "Carrier seats: "
+        f"{summary.carrier_seats_current:,} vs {summary.carrier_seats_prior:,}; "
+        f"{summary.carrier_seat_change:+,} "
+        f"({_format_percent(summary.carrier_seat_change_pct)})"
+    )
+    print(
+        "OA seats:      "
+        f"{summary.oa_seats_current:,} vs {summary.oa_seats_prior:,}; "
+        f"{summary.oa_seat_change:+,} "
+        f"({_format_percent(summary.oa_seat_change_pct)})"
+    )
+    return 0
+
+
+def _run_same_store_routes(args: argparse.Namespace) -> int:
+    if args.limit < 1:
+        raise ValueError("--limit must be greater than zero.")
+
+    page = get_same_store_route_page(
+        args.database,
+        args.carrier,
+        args.period,
+        args.sort.replace("-", "_"),
+        args.limit,
+        0,
+    )
+
+    print(
+        f"{args.carrier.upper()} same-store route drivers for {args.period} "
+        f"(top {len(page.routes)} of {page.total})"
+    )
+    print(
+        "O&D       Carrier current/prior   Change       OA current/prior        Change"
+    )
+    for route in page.routes:
+        print(
+            f"{route.origin_code}→{route.destination_code:<3}  "
+            f"{route.carrier_seats_current:>10,}/{route.carrier_seats_prior:<10,} "
+            f"{route.carrier_seat_change:>+10,}  "
+            f"{route.oa_seats_current:>10,}/{route.oa_seats_prior:<10,} "
+            f"{route.oa_seat_change:>+10,}"
+        )
+    return 0
+
+
 def main() -> int:
     parser = _build_parser()
     args = parser.parse_args()
     try:
         if args.command == "ingest":
             return _run_ingest(args)
-        return _run_route(args)
+        if args.command == "route":
+            return _run_route(args)
+        if args.command == "same-store-summary":
+            return _run_same_store_summary(args)
+        return _run_same_store_routes(args)
     except (OSError, ValidationError, ValueError) as error:
         parser.exit(2, f"error: {error}\n")
 

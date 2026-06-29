@@ -61,3 +61,59 @@ This returns the selected carrier's seats, total market seats, and implied OA se
 - **Reconciliation:** a validation that two related sources agree enough to use together. Here, each carrier O&D/month must exist in the market data and combined supplied carrier seats cannot exceed total market seats.
 
 The next milestone implements the same-store monthly and quarterly SQL calculation on this trusted data foundation.
+
+## Milestone 2: same-store analytics
+
+The canonical SQL in `src/capacity_tool/sql/same_store_routes.sql`:
+
+1. Aggregates the selected carrier by directional O&D in the current period.
+2. Repeats that aggregation for the equivalent prior-year period.
+3. Inner-joins those route sets, excluding new, dropped, and zero-capacity routes.
+4. Attaches market capacity for the exact same routes and periods.
+5. Calculates current/prior carrier seats, OA seats, absolute changes, and change ratios.
+
+Run an aggregate quarterly comparison:
+
+```sh
+.venv/bin/capacity-ingest same-store-summary \
+  --carrier DL \
+  --period 2026-Q2
+```
+
+Inspect the largest route-level OA drivers:
+
+```sh
+.venv/bin/capacity-ingest same-store-routes \
+  --carrier DL \
+  --period 2026-Q2 \
+  --sort oa-change \
+  --limit 20
+```
+
+Periods accept `YYYY-MM` for monthly comparisons and `YYYY-QN` for quarterly comparisons. Percentages are calculated from aggregate seat totals in SQL and returned as ratios; presentation code formats `0.047` as `4.7%`.
+
+## Milestone 3: HTTP API
+
+Start the local FastAPI server from the repository root:
+
+```sh
+.venv/bin/uvicorn capacity_tool.api.app:app --reload
+```
+
+Then open the generated interactive OpenAPI documentation:
+
+```text
+http://127.0.0.1:8000/docs
+```
+
+The API exposes:
+
+```text
+GET /health
+GET /api/carriers
+GET /api/periods?granularity=month|quarter
+GET /api/capacity/summary?carrier=DL&period=2026-Q2
+GET /api/capacity/routes?carrier=DL&period=2026-Q2&sort=oa_change&limit=50&offset=0
+```
+
+The endpoint functions validate HTTP input and map typed query results into Pydantic response models. They do not duplicate the same-store calculation; all analytical population and metric logic remains in the canonical SQL query.
