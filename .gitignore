@@ -1,0 +1,7 @@
+data/
+plan.md
+context.md
+warehouse/
+.venv/
+.pytest_cache/
+__pycache__/
